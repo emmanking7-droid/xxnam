@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Shared Calendar — Live Share Ready</title>
-  <meta name="description" content="A single-file calendar with optional live sharing via Firebase (paste your config). Falls back to local-only if not enabled." />
+  <title>Shared Calendar — Rooms & Presence</title>
+  <meta name="description" content="A single-file calendar with rooms and live sharing via Firebase (paste your config). Falls back to local-only if not enabled." />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://www.gstatic.com; connect-src 'self' https://firestore.googleapis.com; object-src 'none'; base-uri 'none'">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
       --bg:#0b0d12; --panel:#0f131a; --panel-2:#11141b; --text:#e9edf1; --muted:#a7b0bb; --brand:#6aa7ff; --brand2:#7ef0d3; --radius:16px;
       --ring:0 0 0 3px rgba(106,167,255,.35); --shadow:0 10px 30px rgba(0,0,0,.35); --shadow-sm:0 4px 14px rgba(0,0,0,.25);
       --grid: clamp(14px, 2.4vw, 22px); --maxw:1100px; --cell-bg:#0d121c; --cell-border:#293043; --cell-hover:#162034;
-      --avail:#2f8f5b;
+      --avail:#2f8f5b; --danger:#ff6565;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -21,14 +21,19 @@
     a{color:var(--text); text-decoration:none}
     .container{max-width:var(--maxw); margin-inline:auto; padding:0 var(--grid)}
     header{position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:linear-gradient(180deg, rgba(11,13,18,.78), rgba(11,13,18,.45)); border-bottom:1px solid rgba(255,255,255,.06)}
-    .nav{display:flex; align-items:center; justify-content:space-between; height:70px}
+    .nav{display:flex; align-items:center; justify-content:space-between; gap:10px; padding-block:10px}
     .logo{display:flex; align-items:center; gap:10px; font-weight:800}
     .logo-mark{height:28px; width:28px; border-radius:8px; background:conic-gradient(from 220deg, var(--brand), var(--brand2)); box-shadow:0 0 30px rgba(106,167,255,.35)}
     .controls{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
-    .btn{display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:9999px; border:1px solid #2a2f39; background:#0f131a; color:var(--text); font-weight:600}
+    .btn{display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:9999px; border:1px solid #2a2f39; background:#0f131a; color:var(--text); font-weight:600; cursor:pointer}
     .btn.primary{background:linear-gradient(135deg, var(--brand), var(--brand2)); color:#0b0d12; border-color:transparent}
     .btn:focus{outline:none; box-shadow:var(--ring)}
+    .btn[disabled]{opacity:.6; cursor:not-allowed}
     .badge{padding:6px 10px; border-radius:999px; background:#141927; border:1px solid #2a2f39; color:var(--muted); font-weight:600}
+
+    .pill-input{display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #2a2f39; border-radius:999px; background:#0f131a}
+    .pill-input input{background:transparent; border:none; color:var(--text); outline:none; min-width:120px}
+    .pill-input .label{color:var(--muted); font-size:12px}
 
     .calendar{background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); border-radius:var(--radius); box-shadow:var(--shadow-sm); overflow:hidden}
     .cal-head{display:flex; align-items:center; justify-content:space-between; padding:12px}
@@ -54,17 +59,47 @@
     input, textarea{width:100%; background:#0f131a; border:1px solid #2a2f39; color:var(--text); padding:10px; border-radius:10px}
     label{color:var(--muted); font-size:13px}
     #conflictMsg{color:#ffb4b4}
+
+    /* Presence popover */
+    .popover{position:relative}
+    .popover-panel{position:absolute; right:0; top:calc(100% + 8px); min-width:260px; background:#0f131a; border:1px solid #2a2f39; border-radius:14px; box-shadow:var(--shadow); padding:10px; display:none}
+    .popover.open .popover-panel{display:block}
+    .roster{display:flex; flex-direction:column; gap:6px; max-height:260px; overflow:auto}
+    .roster .row{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; background:#111727; border:1px solid rgba(255,255,255,.06); border-radius:10px}
+    .dot{width:8px; height:8px; border-radius:999px; background:#66f28f; box-shadow:0 0 8px rgba(102,242,143,.7)}
+    .muted{color:var(--muted)}
   </style>
 </head>
 <body>
   <header>
     <div class="container nav">
-      <a class="logo" href="#">
+      <a class="logo" href="#" title="Shared Calendar">
         <span class="logo-mark" aria-hidden="true"></span>
         <span>Shared Calendar</span>
       </a>
-      <div class="controls">
+      <div class="controls" style="flex:1; justify-content:flex-end">
         <span id="liveBadge" class="badge">Local only</span>
+
+        <div class="pill-input" title="Your display name">
+          <span class="label">You</span>
+          <input id="displayName" placeholder="e.g., Alex" />
+        </div>
+        <div class="pill-input" title="Room name (everyone joins the same name)">
+          <span class="label">Room</span>
+          <input id="roomInput" placeholder="e.g., movie-night" />
+        </div>
+        <button class="btn" id="btnJoin">Join</button>
+        <div class="popover" id="presencePopover">
+          <button class="btn" id="btnPresence"><span id="presenceCount">0</span> online ▾</button>
+          <div class="popover-panel">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px">
+              <div class="muted" id="roomLabel">Room: —</div>
+              <button class="btn" id="btnLeave" style="padding:6px 10px">Leave</button>
+            </div>
+            <div class="roster" id="roster"></div>
+          </div>
+        </div>
+
         <button class="btn" id="btnPrev">◀</button>
         <div id="monthLabel" style="min-width:220px; text-align:center; font-weight:800"></div>
         <button class="btn" id="btnNext">▶</button>
@@ -77,7 +112,7 @@
   <main class="container hero">
     <section class="calendar">
       <div class="cal-head">
-        <div class="sub">Click a day to add an activity or mark availability. Click an activity to edit. Use ✕ on a chip to cancel/uncancel quickly.</div>
+        <div class="sub">Choose a <b>room name</b>, click <b>Join</b>, then everyone in the same room sees the same calendar and who's online. Click a day to add an activity or mark availability. Click an activity to edit. Use ✕ on a chip to cancel/uncancel quickly.</div>
       </div>
       <div class="cal-grid" id="dow"></div>
       <div class="cal-grid" id="grid"></div>
@@ -88,7 +123,6 @@
     <form method="dialog" id="eventForm">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 16px 0">
         <h3 style="margin:0">Activity</h3>
-        <!-- Close without saving or filling anything -->
         <button class="btn" value="cancel" type="submit" formmethod="dialog">✕</button>
       </div>
       <div style="padding:16px; display:grid; gap:10px">
@@ -129,36 +163,51 @@
   </dialog>
 
   <script type="module">
+    // === Optional Firebase Config ===
+    // Paste your Firebase config object below (or leave null for local-only):
+    // Example: const FIREBASE_CONFIG = { apiKey:"...", authDomain:"...", projectId:"..." };
+    const FIREBASE_CONFIG = null; // <— paste object here to enable live sharing
+
+    // Lightweight UID for presence & writes
+    const CLIENT_ID = `c_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+
+    // DOM helpers
     const $ = (sel, root=document) => root.querySelector(sel);
     const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
     const pad = (n) => String(n).padStart(2,'0');
     const toKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-    const STORAGE_KEY = 'shared-calendar-state-v1';
 
-    function genId(){ return `e_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`; }
-
-    function loadState(){
-      try{
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if(!raw) throw 0;
-        const s = JSON.parse(raw);
-        // ensure defaults
-        return {
-          today: new Date(),
-          cursor: s.cursor ? new Date(s.cursor) : new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-          events: Array.isArray(s.events)? s.events : [],
-          available: s.available || {}
-        };
-      }catch{
-        return { today:new Date(), cursor:new Date(new Date().getFullYear(), new Date().getMonth(),1), events:[], available:{} };
-      }
-    }
-    function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-
-    let state = loadState();
-
+    // UI elements
     const gridEl=$('#grid'); const dowEl=$('#dow'); const monthLabel=$('#monthLabel');
+    const liveBadge=$('#liveBadge'); const presenceCountEl=$('#presenceCount');
+    const rosterEl=$('#roster'); const presencePopover=$('#presencePopover');
+    const btnPresence=$('#btnPresence'); const btnLeave=$('#btnLeave');
+    const roomLabel=$('#roomLabel');
     ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d=>{const div=document.createElement('div');div.className='dow';div.textContent=d;dowEl.appendChild(div);});
+
+    // Per-room local storage key
+    const storageKeyFor = (room) => `shared-calendar-${room||'local'}-v2`;
+
+    // App state (per room)
+    let state = {
+      room: '',
+      userName: localStorage.getItem('displayName') || '',
+      today: new Date(),
+      cursor: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+      events: [],
+      available: {},
+      online: [] // {id, name, lastActive}
+    };
+
+    // Presence heartbeat control
+    let presenceInterval = null;
+
+    // Elements
+    const nameInput = $('#displayName');
+    const roomInput = $('#roomInput');
+    const btnJoin = $('#btnJoin');
+
+    nameInput.value = state.userName;
 
     let markingAvailability=false;
     $('#btnToggleAvail').addEventListener('click',()=>{
@@ -166,6 +215,7 @@
       alert(markingAvailability?"Click days to mark yourself available":"Back to adding activities");
     });
 
+    // Calendar rendering
     function render(){
       monthLabel.textContent=state.cursor.toLocaleString(undefined,{month:'long',year:'numeric'});
       gridEl.innerHTML='';
@@ -182,7 +232,7 @@
         if(toKey(d)===toKey(state.today))cell.classList.add('today');
 
         const num=document.createElement('div');num.className='daynum';num.textContent=String(d.getDate());cell.appendChild(num);
-        if(state.available[k]){const dot=document.createElement('div');dot.className='available';cell.appendChild(dot);}
+        if(state.available[k]){const dot=document.createElement('div');dot.className='available';cell.appendChild(dot);} // local-only availability
 
         // events for this day
         const todays = state.events
@@ -209,7 +259,7 @@
           cancelBtn.addEventListener('click',(e)=>{
             e.stopPropagation();
             ev.cancelled = !ev.cancelled;
-            saveState(); render();
+            saveEvent(ev);
           });
           actions.appendChild(cancelBtn);
 
@@ -222,7 +272,7 @@
         cell.addEventListener('click',()=>{
           if(markingAvailability){
             state.available[k]=!state.available[k];
-            saveState();
+            saveLocal();
             render();
           }else{
             openDialog({date:k,start:'18:00',end:'20:00'});
@@ -232,13 +282,17 @@
         gridEl.appendChild(cell);
       }
 
-      // persist current cursor month too
-      saveState();
+      // header bits
+      $('#roomLabel').textContent = `Room: ${state.room || '—'}`;
+      saveLocal();
     }
 
+    // Dialog refs
     const dlg=$('#eventDialog'); const form=$('#eventForm');
     const idEl=$('#evtId'), titleEl=$('#evtTitle'), dateEl=$('#evtDate'), sEl=$('#evtStart'), eEl=$('#evtEnd'), pEl=$('#evtPeople'), nEl=$('#evtNotes');
     const statusChip=$('#evtStatusChip');
+
+    function genId(){ return `e_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`; }
 
     function setStatusChip(cancelled){
       statusChip.textContent = cancelled ? 'Cancelled' : 'Planned';
@@ -258,42 +312,34 @@
       dlg.showModal();
     }
 
-    // Save only when Save button is used; ✕ closes without saving
+    // Save only when Save button used
     form.addEventListener('submit',(e)=>{
       const action = e.submitter && e.submitter.value;
-      if(action!=='save'){ return; } // allow dialog to close naturally
+      if(action!=='save'){ return; }
       e.preventDefault();
 
       const id = idEl.value || genId();
-      const title = titleEl.value.trim() || 'Untitled';
+      const title = (titleEl.value||'').trim() || 'Untitled';
       const date = dateEl.value || toKey(new Date());
       const start = sEl.value || '';
       const end = eEl.value || '';
       const people = pEl.value ? pEl.value.split(',').map(s=>s.trim()).filter(Boolean) : [];
       const notes = nEl.value || '';
 
-      // if existing, keep cancelled state
       const existingIdx = state.events.findIndex(x=>x.id===id);
       const cancelled = existingIdx>=0 ? !!state.events[existingIdx].cancelled : false;
 
       const evt = { id, title, date, start, end, people, notes, cancelled };
+      saveEvent(evt);
 
-      if(existingIdx>=0){ state.events[existingIdx]=evt; }
-      else { state.events.push(evt); }
-
-      saveState();
       dlg.close();
-      render();
     });
 
     // Delete button
-    $('#btnDelete').addEventListener('click',()=>{
-      const id = idEl.value;
-      if(!id){ dlg.close(); return; }
-      state.events = state.events.filter(x=>x.id!==id);
-      saveState();
+    $('#btnDelete').addEventListener('click', async()=>{
+      const id = idEl.value; if(!id){ dlg.close(); return; }
+      await deleteEventById(id);
       dlg.close();
-      render();
     });
 
     // Prev/Next/Add buttons
@@ -301,27 +347,174 @@
     $('#btnNext').addEventListener('click',()=>{state.cursor=new Date(state.cursor.getFullYear(),state.cursor.getMonth()+1,1);render();});
     $('#btnAdd').addEventListener('click',()=>openDialog({date:toKey(state.today)}));
 
-    // Optional: clicking the status chip toggles cancelled in-place for current dialog event (no typing)
+    // Toggle cancel directly in dialog
     statusChip.addEventListener('click',()=>{
       const currentId = idEl.value;
       const isEditingExisting = !!currentId;
       if(isEditingExisting){
         const idx = state.events.findIndex(x=>x.id===currentId);
-        if(idx>=0){
-          state.events[idx].cancelled = !state.events[idx].cancelled;
-          setStatusChip(state.events[idx].cancelled);
-          saveState();
-          render();
-        }
+        if(idx>=0){ state.events[idx].cancelled = !state.events[idx].cancelled; saveEvent(state.events[idx]); }
       }else{
-        // toggles a temporary view state only; actual save applies when user clicks Save
         const nowCancelled = statusChip.textContent!=='Cancelled';
         setStatusChip(nowCancelled);
       }
     });
 
-    // Initial render
-    render();
+    // Presence popover toggle
+    btnPresence.addEventListener('click',()=>{ presencePopover.classList.toggle('open'); });
+    document.addEventListener('click',(e)=>{ if(!presencePopover.contains(e.target)) presencePopover.classList.remove('open'); });
+
+    // Join / Leave room
+    btnJoin.addEventListener('click', ()=> joinRoom());
+    btnLeave.addEventListener('click', ()=> leaveRoom());
+
+    function sanitizeRoomName(s){ return (s||'').toLowerCase().trim().replace(/[^a-z0-9-_]+/g,'-').slice(0,64) || 'default'; }
+
+    function saveLocal(){
+      // save per-room local cache (also used when offline)
+      const key = storageKeyFor(state.room);
+      const data = { cursor: state.cursor, events: state.events, available: state.available };
+      localStorage.setItem(key, JSON.stringify(data));
+      if(state.userName){ localStorage.setItem('displayName', state.userName); }
+    }
+
+    function loadLocal(room){
+      const key = storageKeyFor(room);
+      try{
+        const raw = localStorage.getItem(key);
+        if(!raw) throw 0;
+        const s = JSON.parse(raw);
+        state.cursor = s.cursor ? new Date(s.cursor) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        state.events = Array.isArray(s.events)? s.events : [];
+        state.available = s.available || {};
+      }catch{
+        state.cursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        state.events = [];
+        state.available = {};
+      }
+    }
+
+    // === Live backend (Firebase) ===
+    let app=null, db=null, unsubEvents=null, unsubPresence=null, presenceDocRef=null;
+    let fbReady=false;
+
+    async function initFirebase(){
+      if(!FIREBASE_CONFIG){ fbReady=false; return; }
+      const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+      const { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc, serverTimestamp, query, orderBy } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+      app = initializeApp(FIREBASE_CONFIG);
+      db = getFirestore(app);
+      fbReady = true;
+      // Attach helpers into closure scope
+      window.__fb = { collection, doc, onSnapshot, setDoc, deleteDoc, serverTimestamp, query, orderBy };
+      liveBadge.textContent = 'Live ready (paste config ✓)';
+    }
+
+    // Join a room: subscribe to events & presence
+    async function joinRoom(){
+      state.userName = (nameInput.value||'').trim() || 'Guest';
+      const nextRoom = sanitizeRoomName(roomInput.value);
+      if(state.room === nextRoom) return;
+
+      // cleanup old listeners
+      await leaveRoom(false);
+
+      state.room = nextRoom;
+      loadLocal(state.room);
+      roomLabel.textContent = `Room: ${state.room}`;
+
+      if(!fbReady){
+        liveBadge.textContent = `Local room: ${state.room} (no sync)`;
+        render();
+        return;
+      }
+
+      const { collection, doc, onSnapshot, setDoc, deleteDoc, serverTimestamp, query, orderBy } = window.__fb;
+
+      // Events live sync
+      const eventsCol = collection(db, 'rooms', state.room, 'events');
+      unsubEvents = onSnapshot(query(eventsCol, orderBy('date'), orderBy('start')),(snap)=>{
+        state.events = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+        render();
+      });
+
+      // Presence: create/update my presence doc and watch all
+      const presenceCol = collection(db, 'rooms', state.room, 'presence');
+      presenceDocRef = doc(presenceCol, CLIENT_ID);
+      await setDoc(presenceDocRef, { id: CLIENT_ID, name: state.userName, lastActive: serverTimestamp() }, { merge:true });
+
+      if(presenceInterval) clearInterval(presenceInterval);
+      presenceInterval = setInterval(()=>{ setDoc(presenceDocRef, { name: state.userName, lastActive: serverTimestamp() }, { merge:true }); }, 15000);
+
+      unsubPresence = onSnapshot(presenceCol,(snap)=>{
+        state.online = snap.docs.map(d=>d.data()).sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+        presenceCountEl.textContent = String(state.online.length);
+        rosterEl.innerHTML = '';
+        state.online.forEach(u=>{
+          const row=document.createElement('div'); row.className='row';
+          row.innerHTML = `<div style="display:flex; align-items:center; gap:8px"><span class="dot"></span><strong>${escapeHtml(u.name||'Guest')}</strong></div><span class="muted">${u.id===CLIENT_ID? 'You' : ''}</span>`;
+          rosterEl.appendChild(row);
+        });
+        liveBadge.textContent = `Room: ${state.room} · ${state.online.length} online`;
+      });
+
+      // immediate render (uses cached local data until first snapshot)
+      render();
+
+      // save myself on unload
+      window.addEventListener('beforeunload', cleanupPresence);
+    }
+
+    async function leaveRoom(resetInputs=true){
+      if(unsubEvents){ unsubEvents(); unsubEvents=null; }
+      if(unsubPresence){ unsubPresence(); unsubPresence=null; }
+      if(presenceInterval){ clearInterval(presenceInterval); presenceInterval=null; }
+      await cleanupPresence();
+      if(resetInputs){ roomInput.value=''; }
+      presenceCountEl.textContent = '0'; rosterEl.innerHTML='';
+      liveBadge.textContent = FIREBASE_CONFIG? 'Live ready' : 'Local only';
+    }
+
+    async function cleanupPresence(){
+      try{
+        if(presenceDocRef && fbReady){ const { deleteDoc } = window.__fb; await deleteDoc(presenceDocRef); }
+      }catch{ /* ignore */ }
+      finally{ presenceDocRef=null; }
+    }
+
+    // Save an event (local or cloud)
+    async function saveEvent(evt){
+      const idx = state.events.findIndex(x=>x.id===evt.id);
+      if(idx>=0) state.events[idx]=evt; else state.events.push(evt);
+
+      if(fbReady && state.room){
+        const { collection, doc, setDoc } = window.__fb;
+        const ref = doc(collection(db,'rooms', state.room, 'events'), evt.id);
+        await setDoc(ref, evt, { merge:true });
+      }
+      saveLocal();
+      render();
+    }
+
+    async function deleteEventById(id){
+      state.events = state.events.filter(x=>x.id!==id);
+      if(fbReady && state.room){
+        const { collection, doc, deleteDoc } = window.__fb;
+        const ref = doc(collection(db,'rooms', state.room, 'events'), id);
+        try{ await deleteDoc(ref);}catch{/* ignore */}
+      }
+      saveLocal();
+      render();
+    }
+
+    function escapeHtml(s){ return (s||'').replace(/[&<>"]g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+
+    // Initial
+    (async function init(){
+      try{ await initFirebase(); }catch{ /* remain offline */ }
+      liveBadge.textContent = FIREBASE_CONFIG? 'Live ready' : 'Local only';
+      render();
+    })();
   </script>
 </body>
 </html>
